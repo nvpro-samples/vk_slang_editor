@@ -1,0 +1,3 @@
+[submodule "extern/ImGuiColorTextEdit"]
+	path = extern/ImGuiColorTextEdit
+	url = https://github.com/NBickford-NV/ImGuiColorTextEdit.git

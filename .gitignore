@@ -1,0 +1,30 @@
+#################
+## Cloned folders
+#################
+nvpro_core/
+nvpro_core2/
+/samples/
+
+##################
+## Build artifacts
+##################
+_bin/
+_install/
+bin_x64/
+_downloaded_resources/
+downloaded_resources/
+
+# Developers typically name their CMake build directory one of these:
+cmake_build/
+cmake_build_linux/
+cmake_build_win/
+cmake_build_legacy/
+cmake_built/
+build/
+build_legacy/
+
+# Other
+autosave*.slang
+autosave*.json
+/sketches/
+/.vscode/
