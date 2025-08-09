@@ -1983,10 +1983,14 @@ static VkResult buildResourcesFromReflection(Resources&                    resou
   // TODO: requiredFormat handling
   {
     // Find all image files
-    const std::filesystem::path                            exeDir = nvutils::getExecutablePath().parent_path();
-    const std::array<std::filesystem::path, 5>             searchPaths{exeDir, TARGET_NAME "_files/media",
-                                                           exeDir / TARGET_EXE_TO_SOURCE_DIRECTORY / "media",
-                                                           exeDir / TARGET_EXE_TO_DOWNLOAD_DIRECTORY};
+    const std::filesystem::path                exeDir = nvutils::getExecutablePath().parent_path();
+    const std::array<std::filesystem::path, 5> searchPaths{
+        exeDir,                                             // Next to .exe
+        exeDir / TARGET_EXE_TO_SOURCE_DIRECTORY / "media",  // Build media path
+        exeDir / TARGET_NAME "_files/media",                // Install media path
+        exeDir / TARGET_EXE_TO_DOWNLOAD_DIRECTORY,          // Build downloaded resources
+        exeDir / "resources"                                // Install downloaded resources
+    };
     std::unordered_map<std::string, std::filesystem::path> idToFile;
     for(const std::filesystem::path& searchDir : searchPaths)
     {

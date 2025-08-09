@@ -428,7 +428,9 @@ VkResult Sample::run()
   if(!initialCompileOk)
   {
     LOGE("Failed to create a renderer using the initial Slang shader! This indicates a problem with the sample.\n");
-    // return VK_ERROR_INVALID_SHADER_NV; // Commented out so that we can observe what's going on
+#ifndef NDEBUG  // In debug mode we'd like to see what's going on
+    return VK_ERROR_INVALID_SHADER_NV;
+#endif
   }
 
   // Load shaderball;
@@ -437,10 +439,14 @@ VkResult Sample::run()
   m_currentSceneVk.init(&m_alloc, &m_samplerPool);
   {
     const std::filesystem::path              exeDir          = nvutils::getExecutablePath().parent_path();
-    const std::vector<std::filesystem::path> meshSearchPaths = {exeDir, TARGET_NAME "_files/media",
-                                                                exeDir / TARGET_EXE_TO_SOURCE_DIRECTORY / "media",
-                                                                exeDir / TARGET_EXE_TO_DOWNLOAD_DIRECTORY};
-    const std::filesystem::path              shaderballPath  = nvutils::findFile("shaderball.glb", meshSearchPaths);
+    const std::vector<std::filesystem::path> meshSearchPaths = {
+        exeDir,                                             // Next to .exe
+        exeDir / TARGET_EXE_TO_SOURCE_DIRECTORY / "media",  // Build media path
+        exeDir / TARGET_NAME "_files/media",                // Install media path
+        exeDir / TARGET_EXE_TO_DOWNLOAD_DIRECTORY,          // Build downloaded resources
+        exeDir / "resources"                                // Install downloaded resources
+    };
+    const std::filesystem::path shaderballPath = nvutils::findFile("shaderball.glb", meshSearchPaths);
     if(shaderballPath.empty())
     {
       return VK_ERROR_INITIALIZATION_FAILED;
