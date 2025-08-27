@@ -1899,8 +1899,8 @@ CpuImage Sample::getThumbnailImage()
   VkCommandBuffer  cmd               = m_app->createTempCmdBuffer();
   VkImage          linearImage       = {};
   VkDeviceMemory   linearImageMemory = {};
-  const VkResult vkRes = nvvk::imageToRgba8Linear(cmd, m_ctx.getDevice(), m_ctx.getPhysicalDevice(), displayTex->image.image,
-                                                  {inputSize.width, inputSize.height}, linearImage, linearImageMemory);
+  const VkResult vkRes = nvvk::imageToLinear(cmd, m_ctx.getDevice(), m_ctx.getPhysicalDevice(), displayTex->image.image,
+                                                  {inputSize.width, inputSize.height}, linearImage, linearImageMemory, VK_FORMAT_R8G8B8A8_UNORM);
   // Account for imageToRgba8Linear's barriers, just in case
   displayTex->image.descriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
   displayTex->currentStages                = nvvk::INFER_BARRIER_PARAMS;
