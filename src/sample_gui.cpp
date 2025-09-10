@@ -1351,14 +1351,10 @@ void Sample::guiPaneParameters()
           ImGui::Text("Allocated: %zu bytes", storageBuffer.buffer.bufferSize);
           if(requiredSize > m_physicalDeviceProperties.limits.maxStorageBufferRange)
           {
-            ImGui::PushFont(nvgui::getIconicFont());
-            ImGui::Text("%s", nvgui::icon_warning);
-            ImGui::PopFont();
-            ImGui::SameLine();
-            ImGui::TextWrapped(
-                "This is too large for a storage buffer -- it is larger than "
-                "VkPhysicalDeviceLimits::maxStorageBufferRange (%u)!",
-                m_physicalDeviceProperties.limits.maxStorageBufferRange);
+            ImGui::TextWrapped(ICON_MS_WARNING
+                               " This is too large for a storage buffer -- it is larger than "
+                               "VkPhysicalDeviceLimits::maxStorageBufferRange (%u)!",
+                               m_physicalDeviceProperties.limits.maxStorageBufferRange);
           }
           return false;
         });
@@ -1456,22 +1452,18 @@ void Sample::guiPaneTargetDisassembly()
 void Sample::guiPaneTransport()
 {
   {
-    ImGui::PushFont(nvgui::getIconicFont());
-
-    if(ImGui::Button(nvgui::icon_media_step_backward))
+    if(ImGui::Button(ICON_MS_FIRST_PAGE))
     {
       m_shaderParams.time = 0.0;
       m_frame             = 0;
     }
 
     ImGui::SameLine();
-    const char* pausePlayIcon = m_shaderParams.paused ? nvgui::icon_media_play : nvgui::icon_media_pause;
+    const char* pausePlayIcon = m_shaderParams.paused ? ICON_MS_PLAY_ARROW : ICON_MS_PAUSE;
     if(ImGui::Button(pausePlayIcon))
     {
       m_shaderParams.paused = !m_shaderParams.paused;
     }
-
-    ImGui::PopFont();
   }
 
   {
@@ -1899,8 +1891,9 @@ CpuImage Sample::getThumbnailImage()
   VkCommandBuffer  cmd               = m_app->createTempCmdBuffer();
   VkImage          linearImage       = {};
   VkDeviceMemory   linearImageMemory = {};
-  const VkResult vkRes = nvvk::imageToLinear(cmd, m_ctx.getDevice(), m_ctx.getPhysicalDevice(), displayTex->image.image,
-                                                  {inputSize.width, inputSize.height}, linearImage, linearImageMemory, VK_FORMAT_R8G8B8A8_UNORM);
+  const VkResult   vkRes =
+      nvvk::imageToLinear(cmd, m_ctx.getDevice(), m_ctx.getPhysicalDevice(), displayTex->image.image,
+                          {inputSize.width, inputSize.height}, linearImage, linearImageMemory, VK_FORMAT_R8G8B8A8_UNORM);
   // Account for imageToRgba8Linear's barriers, just in case
   displayTex->image.descriptor.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
   displayTex->currentStages                = nvvk::INFER_BARRIER_PARAMS;
