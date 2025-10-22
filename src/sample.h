@@ -166,7 +166,7 @@ private:  // Member variables
     uint64_t              timelineValue     = 1;  // TODO: Merge this with m_frame
   } m_staging;
   TextureCache           m_textureCache;
-  nvslang::SlangCompiler m_compiler;
+  nvslang::SlangCompiler m_compiler{true};
   spvtools::Context      m_spirvTools = spvtools::Context(SPV_ENV_VULKAN_1_4);  // For disassembly
 
   // Editor settings

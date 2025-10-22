@@ -2056,8 +2056,8 @@ std::vector<Diagnostic> parseDiagnostics(const std::string& diagnostics)
 
   // Slang emits diagnostics in the form `foundPath(lineNumber): errorLevel code: multi-line-message\n`.
   // The way we call the compiler, our foundPath is either empty
-  // (this usually indicates redundant messages) or a 40-character hexadecimal
-  // hash.
+  // (this usually indicates redundant messages, but if no messages had
+  // hexcodes then we print them) or a 40-character hexadecimal hash.
 
   // First, separate the string into individual diagnostics by breaking on
   // - newline or the start of the string
@@ -2068,6 +2068,7 @@ std::vector<Diagnostic> parseDiagnostics(const std::string& diagnostics)
   std::vector<size_t>     diagnosticMarkerStarts;
   std::vector<size_t>     diagnosticMarkerEnds;
   std::vector<bool>       diagnosticsImportant;
+  bool                    anyDiagnosticsImportant = false;
   for(std::sregex_iterator outer = std::sregex_iterator(diagnostics.begin(), diagnostics.end(), diagnosticStartRegex);
       outer != regexEnd; ++outer)
   {
@@ -2075,14 +2076,19 @@ std::vector<Diagnostic> parseDiagnostics(const std::string& diagnostics)
     const std::ssub_match& hexcode = match[2];
     diagnosticMarkerStarts.push_back(static_cast<size_t>(match.position()));
     diagnosticMarkerEnds.push_back(static_cast<size_t>(match.position() + match.length()));
-    diagnosticsImportant.push_back(hexcode.length() > 0);
+
+    const bool isImportant = hexcode.length() > 0;
+    anyDiagnosticsImportant |= isImportant;
+    diagnosticsImportant.push_back(isImportant);
   }
 
   // Then we'll parse the individal terms:
   static const std::regex diagnosticParseRegex(R"((\d*)\): ([a-z\s]+)(?:\s(\d+))?: ([\s\S]*))");
   for(size_t i = 0; i < diagnosticsImportant.size(); i++)
   {
-    if(!diagnosticsImportant[i])
+    // If we have diagnostics but at least one is marked as 'important', then
+    // only show the important ones.
+    if(!diagnosticsImportant[i] && anyDiagnosticsImportant)
     {
       continue;
     }
