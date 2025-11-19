@@ -119,6 +119,9 @@ private:  // Member variables
   // teardown, the Sample has the App remove its reference to the sample first.
   nvvk::Context                       m_ctx;
   std::shared_ptr<nvapp::Application> m_app;
+  // System info
+  VkPhysicalDeviceProperties m_physicalDeviceProperties{};
+  bool                       m_rayTracingSupported = false;
   // Performance profiler
   nvutils::ProfilerManager                m_profiler;
   nvutils::ProfilerTimeline*              m_profilerTimeline = nullptr;
@@ -139,7 +142,6 @@ private:  // Member variables
   std::vector<nvvk::GraphicsPipelineState> m_graphicsPipelineStates;
   nvvk::GraphicsPipelineState&             getOrCreateGraphicsPipelineState(size_t passIndex);
   LanguageServer                           m_languageServer;
-  VkPhysicalDeviceProperties               m_physicalDeviceProperties{};
   bool                                     m_temporarilyPaused = false;
 
   // State used for the "Are you sure you want to close/exit?" modal

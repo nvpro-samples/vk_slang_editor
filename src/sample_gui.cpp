@@ -264,9 +264,9 @@ VkResult Sample::run()
               // {.extensionName = VK_KHR_MAINTENANCE_8_EXTENSION_NAME, .required = false},                           //
               {.extensionName = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME, .feature = &barycentricFeatures},  //
               {.extensionName = VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, .feature = &robustness2Features},                 //
-              // FIXME: we mainly need this because nvvk::SceneVk uses VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR.
-              {.extensionName = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                        //
-              {.extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, .feature = &asFeatures},  //
+              // These are now optional; we track them in case we add ray tracing in the future.
+              {.extensionName = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, .required = false},  //
+              {.extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, .feature = &asFeatures, .required = false},  //
           },
       .apiVersion = VK_API_VERSION_1_3,  // We go one minor version newer so this works with RenderDoc as of 2025-07-08
   };
@@ -284,6 +284,7 @@ VkResult Sample::run()
 
   NVVK_FAIL_RETURN(m_ctx.init(vkSetup));
   vkGetPhysicalDeviceProperties(m_ctx.getPhysicalDevice(), &m_physicalDeviceProperties);
+  m_rayTracingSupported = m_ctx.hasExtensionEnabled(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
 
   // Memory allocator
   m_alloc.init(VmaAllocatorCreateInfo{
@@ -655,8 +656,7 @@ void Sample::guiPaneAbout()
 
   ImGui::TextWrapped(TARGET_NAME
                      " is part of the NVIDIA DesignWorks Samples, a collection of projects created to help developers "
-                     "learn about GPU programming. You can download the source code for " TARGET_NAME
-                     " and other samples online:");
+                     "learn about GPU programming. You can download the source code for " TARGET_NAME " and other samples online:");
 
   const char* nvproSamplesUrl = "https://github.com/nvpro-samples";
   const float linkWidth       = ImGui::CalcTextSize(nvproSamplesUrl).x;
@@ -1172,9 +1172,8 @@ void Sample::guiPaneParameters()
   PE::Combo("Clear texFrame when:", reinterpret_cast<int*>(&m_shaderParams.clearColorWhen), "Never\0Every frame\0\0");
   PE::ColorEdit4("Clear color", m_shaderParams.clearColor.data(), ImGuiColorEditFlags_Float,
                  "texFrame (if it exists) will be cleared to this color at the start of every frame.");
-  PE::Combo("Clear depth/stencil when:", reinterpret_cast<int*>(&m_shaderParams.clearDepthStencilWhen),
-            "Never\0Every frame\0\0", -1,
-            "Only applies if there is a depth/stencil texture (e.g. Sampler2D<float4> texDepth) in the shader.");
+  PE::Combo("Clear depth/stencil when:", reinterpret_cast<int*>(&m_shaderParams.clearDepthStencilWhen), "Never\0Every frame\0\0",
+            -1, "Only applies if there is a depth/stencil texture (e.g. Sampler2D<float4> texDepth) in the shader.");
   PE::InputFloat("Clear depth value", &m_shaderParams.clearDepth);
   PE::InputInt("Clear stencil value", reinterpret_cast<int*>(&m_shaderParams.clearStencil), 0, 0);
   PE::end();
@@ -1699,8 +1698,7 @@ void Sample::onUIMenu()
   if(saveShaderAndConfig)
   {
     const std::filesystem::path filename =
-        nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Shader and Config...",
-                                    "Slang Shader (.slang)|*.slang");
+        nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Shader and Config...", "Slang Shader (.slang)|*.slang");
     if(!filename.empty())
     {
       this->saveShaderAndConfig(filename, true);
@@ -1710,8 +1708,8 @@ void Sample::onUIMenu()
   const Texture* displayTex = getDisplayTexture();
   if(saveViewport && displayTex)
   {
-    const std::filesystem::path filename = nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Viewport...",
-                                                                       "PNG(.png),JPG(.jpg)|*.png;*.jpg;*.jpeg");
+    const std::filesystem::path filename =
+        nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Viewport...", "PNG(.png),JPG(.jpg)|*.png;*.jpg;*.jpeg");
     if(!filename.empty())
     {
       m_app->saveImageToFile(displayTex->image.image, {displayTex->size.width, displayTex->size.height}, filename);
@@ -1720,9 +1718,8 @@ void Sample::onUIMenu()
 
   if(saveScreen)
   {
-    const std::filesystem::path filename =
-        nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Screen Including UI...",
-                                    "PNG(.png),JPG(.jpg)|*.png;*.jpg;*.jpeg");
+    const std::filesystem::path filename = nvgui::windowSaveFileDialog(m_app->getWindowHandle(), "Save Screen Including UI...",
+                                                                       "PNG(.png),JPG(.jpg)|*.png;*.jpg;*.jpeg");
     if(!filename.empty())
     {
       m_app->screenShot(filename);
@@ -1837,7 +1834,7 @@ void Sample::onFileDrop(const std::filesystem::path& filename)
 
   VkCommandBuffer cmd = m_app->createTempCmdBuffer();
   m_staging.uploader.setEnableLayoutBarriers(true);
-  m_currentSceneVk.create(cmd, m_staging.uploader, m_currentScene);
+  m_currentSceneVk.create(cmd, m_staging.uploader, m_currentScene, true /* generateMipmaps */, m_rayTracingSupported);
   m_staging.uploader.cmdUploadAppended(cmd);
   m_staging.uploader.setEnableLayoutBarriers(false);
   m_app->submitAndWaitTempCmdBuffer(cmd);
