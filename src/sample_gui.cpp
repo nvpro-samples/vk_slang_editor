@@ -37,7 +37,7 @@
 
 #include <GLFW/glfw3.h>
 #include <imgui/imgui_internal.h>
-#include <roboto/roboto_regular.h>
+#include <spirv_cross/spirv.h>
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb/stb_image_resize2.h>
 #define TINYGLTF_IMPLEMENTATION
@@ -237,36 +237,43 @@ void Sample::closeCallback()
 VkResult Sample::run()
 {
   // Vulkan extensions
-  VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineExeFeatures{
-      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
-  VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR csDerivativeFeatures{
-      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
-  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
   VkPhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic3Features{
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT};
+  VkPhysicalDeviceRobustness2FeaturesEXT robustness2Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
+  VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineExeFeatures{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR};
+  VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
+  VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR subgroupRotateFeatures{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES_KHR};
+  VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR csDerivativeFeatures{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
   VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR barycentricFeatures{
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR};
-  VkPhysicalDeviceRobustness2FeaturesEXT robustness2Features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT};
   VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+
   nvvk::ContextInitInfo vkSetup{
       .instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
       .deviceExtensions =
           {
-              //
-              {.extensionName = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME, .feature = &pipelineExeFeatures},  //
-              {.extensionName = VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, .feature = &csDerivativeFeatures, .required = false},  //
-              {.extensionName = VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, .feature = &atomicFloatFeatures, .required = false},  //
-              // {.extensionName = VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME},                              //
+              // Core extensions we require
               {.extensionName = VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME},                                  //
               {.extensionName = VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, .feature = &dynamic3Features},  //
+              {.extensionName = VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, .feature = &robustness2Features},           //
               {.extensionName = VK_KHR_MAINTENANCE_5_EXTENSION_NAME},                                           //
-              // Turned off until more drivers support it:
-              // {.extensionName = VK_KHR_MAINTENANCE_8_EXTENSION_NAME, .required = false},                           //
-              {.extensionName = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME, .feature = &barycentricFeatures},  //
-              {.extensionName = VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, .feature = &robustness2Features},                 //
+              {.extensionName = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME, .feature = &pipelineExeFeatures},  //
+              // Turned off until more drivers support them:
+#if 0
+              {.extensionName = VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME}, //
+              {.extensionName = VK_KHR_MAINTENANCE_8_EXTENSION_NAME, .required = false},  //
+#endif
+              // Optional features some shaders might use:
+              {.extensionName = VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, .feature = &atomicFloatFeatures, .required = false},  // //
+              {.extensionName = VK_KHR_SHADER_SUBGROUP_ROTATE_EXTENSION_NAME, .feature = &subgroupRotateFeatures, .required = false},  //
+              {.extensionName = VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME, .feature = &csDerivativeFeatures, .required = false},  //
+              {.extensionName = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME, .feature = &barycentricFeatures, .required = false},  //
               // These are now optional; we track them in case we add ray tracing in the future.
-              {.extensionName = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, .required = false},  //
               {.extensionName = VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, .feature = &asFeatures, .required = false},  //
+              {.extensionName = VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, .required = false},  //
           },
       .apiVersion = VK_API_VERSION_1_3,  // We go one minor version newer so this works with RenderDoc as of 2025-07-08
   };
@@ -275,6 +282,7 @@ VkResult Sample::run()
   validationInfo.setPreset(nvvk::ValidationSettings::LayerPresets::eDebugPrintf);
   validationInfo.printf_to_stdout = true;
   vkSetup.instanceCreateInfoExt   = validationInfo.buildPNextChain();
+
   // TODO: Headless mode
   if(true)
   {
@@ -282,9 +290,46 @@ VkResult Sample::run()
     vkSetup.deviceExtensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
   }
 
+  // Create the Vulkan device:
   NVVK_FAIL_RETURN(m_ctx.init(vkSetup));
-  vkGetPhysicalDeviceProperties(m_ctx.getPhysicalDevice(), &m_physicalDeviceProperties);
-  m_rayTracingSupported = m_ctx.hasExtensionEnabled(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+
+  // Get device properties
+  vkGetPhysicalDeviceProperties2(m_ctx.getPhysicalDevice(), &m_physicalDeviceProperties);
+  m_rayTracingSupported = (asFeatures.accelerationStructure == VK_TRUE);
+
+  // Based on which extensions/features weren't available, mark some SPIR-V
+  // capabilities as unsupported. More on this in the SPIR-V checking code in
+  // sample_render.cpp.
+  {
+    auto checkCapability = [&](bool supported, SpvCapability capability) {
+      if(!supported)
+      {
+        m_unsupportedSpirvCapabilities.insert(capability);
+      }
+    };
+
+    const VkPhysicalDeviceFeatures& deviceFeatures = m_ctx.getPhysicalDeviceFeatures();
+    checkCapability(deviceFeatures.shaderImageGatherExtended, SpvCapabilityImageGatherExtended);
+    // Subgroup operations
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT), SpvCapabilityGroupNonUniform);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_VOTE_BIT), SpvCapabilityGroupNonUniformVote);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT),
+                    SpvCapabilityGroupNonUniformArithmetic);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT), SpvCapabilityGroupNonUniformBallot);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_BIT), SpvCapabilityGroupNonUniformShuffle);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT),
+                    SpvCapabilityGroupNonUniformShuffleRelative);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_CLUSTERED_BIT),
+                    SpvCapabilityGroupNonUniformClustered);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT), SpvCapabilityGroupNonUniformQuad);
+    checkCapability(!!(m_subgroupProperties.supportedOperations & VK_SUBGROUP_FEATURE_ROTATE_BIT), SpvCapabilityGroupNonUniformRotateKHR);
+    // Extensions
+    checkCapability(atomicFloatFeatures.shaderBufferFloat32AtomicAdd, SpvCapabilityAtomicFloat32AddEXT);
+    checkCapability(atomicFloatFeatures.shaderBufferFloat64AtomicAdd, SpvCapabilityAtomicFloat64AddEXT);
+    checkCapability(csDerivativeFeatures.computeDerivativeGroupLinear, SpvCapabilityComputeDerivativeGroupLinearKHR);
+    checkCapability(csDerivativeFeatures.computeDerivativeGroupQuads, SpvCapabilityComputeDerivativeGroupQuadsKHR);
+    checkCapability(barycentricFeatures.fragmentShaderBarycentric, SpvCapabilityFragmentBarycentricKHR);
+  }
 
   // Memory allocator
   m_alloc.init(VmaAllocatorCreateInfo{
@@ -411,18 +456,23 @@ VkResult Sample::run()
   }
 
   // Setup text editor
-  updateTextEditorSettings();
-  updateTextEditorPalettes();
-  m_editors[+Editor::eCode].SetLanguage(getSlangLanguageInfo());
-  m_editors[+Editor::eTargetDisassembly].SetReadOnlyEnabled(true);
-  m_editors[+Editor::eBinaryDisassembly].SetReadOnlyEnabled(true);
-  m_languageServer.init(m_editors[+Editor::eCode]);
+  {
+    updateTextEditorSettings();
+    updateTextEditorPalettes();
+    m_editors[+Editor::eCode].SetLanguage(getSlangLanguageInfo());
+    m_editors[+Editor::eTargetDisassembly].SetReadOnlyEnabled(true);
+    m_editors[+Editor::eBinaryDisassembly].SetReadOnlyEnabled(true);
+    m_languageServer.init(m_editors[+Editor::eCode]);
+  }
 
   // Default compiler settings
-  m_compiler.defaultTarget();
-  m_compiler.defaultOptions();
-  m_compiler.addOption({slang::CompilerOptionName::DebugInformation, {slang::CompilerOptionValueKind::Int, 1}});
-  m_compiler.addOption({slang::CompilerOptionName::Optimization, {slang::CompilerOptionValueKind::Int, 0}});
+  {
+    m_compiler.defaultTarget();
+    m_compiler.defaultOptions();
+    m_compiler.addOption({slang::CompilerOptionName::DebugInformation, {slang::CompilerOptionValueKind::Int, 1}});
+    m_compiler.addOption({slang::CompilerOptionName::Optimization, {slang::CompilerOptionValueKind::Int, 0}});
+    m_compiler.addOption({slang::CompilerOptionName::IgnoreCapabilities, {slang::CompilerOptionValueKind::Int, 1}});
+  }
 
   // Compile initial shader
   const bool initialCompileOk = openSlangCode(kDefaultComputeShader, "");
@@ -1348,12 +1398,13 @@ void Sample::guiPaneParameters()
           ImGui::Text("Element stride: %zu bytes", storageBuffer.elementStride);
           ImGui::Text("Required: %zu bytes", requiredSize);
           ImGui::Text("Allocated: %zu bytes", storageBuffer.buffer.bufferSize);
-          if(requiredSize > m_physicalDeviceProperties.limits.maxStorageBufferRange)
+
+          if(requiredSize > m_physicalDeviceProperties.properties.limits.maxStorageBufferRange)
           {
             ImGui::TextWrapped(ICON_MS_WARNING
                                " This is too large for a storage buffer -- it is larger than "
                                "VkPhysicalDeviceLimits::maxStorageBufferRange (%u)!",
-                               m_physicalDeviceProperties.limits.maxStorageBufferRange);
+                               m_physicalDeviceProperties.properties.limits.maxStorageBufferRange);
           }
           return false;
         });
@@ -1688,7 +1739,7 @@ void Sample::onUIMenu()
   {
     m_modal.action             = ModalState::Action::eLoadOrNew;
     m_modal.confirmationNeeded = hasCodeChanged();
-    m_modal.fileToLoad         = openFilename;
+    m_modal.fileToLoad         = std::move(openFilename);
     if(m_modal.confirmationNeeded)
     {
       ImGui::OpenPopup(kUIModalShaderLoad);
@@ -2193,17 +2244,15 @@ void Sample::updateDiagnosticMarkers()
 
 static void errorHandler() noexcept
 {
-// Something terrible has happened, probably a segfault!
-// Because of that, we'll try to be safer than usual.
-// Save the state of the app to files that can be read to create an issue
-// either for the compiler or the vk_slang_editor sample.
+  // Something terrible has happened, probably a segfault!
+  // Because of that, we'll try to be safer than usual.
+  // Save the state of the app to files that can be read to create an issue
+  // either for the compiler or the vk_slang_editor sample.
 
-// Note that because logging isn't asynchronous-safe, this function
-// relies on undefined behavior. But, well, we're crashing anyways.
-// And if we segfaulted, then this iat least a synchronous signal.
-#if 0  // To be enabled once MR is merged
+  // Note that because logging isn't asynchronous-safe, this function
+  // relies on undefined behavior. But, well, we're crashing anyways.
+  // And if we segfaulted, then this iat least a synchronous signal.
   nvutils::Logger::getInstance().setFileFlush(true);
-#endif
   LOGE(
       "A fatal exception occurred! This app will now attempt to save the shader you were working on. If this was a "
       "shader compiler crash, please create an issue for it at https://github.com/shader-slang/slang/issues and attach "

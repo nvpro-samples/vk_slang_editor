@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -31,6 +31,8 @@
 
 #include <glm/detail/type_half.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#define SPV_ENABLE_UTILITY_CODE
+#include <spirv_cross/spirv.h>
 
 #include <bit>
 #include <limits>
@@ -283,7 +285,7 @@ void Sample::syncResources(VkCommandBuffer cmd)
     StorageBufferParameters& params       = m_shaderParams.storageBuffers[storageBuffer.name];
     const VkDeviceSize       requiredSize = params.computeBufferSize(resolution, storageBuffer.elementStride);
 
-    if(requiredSize > m_physicalDeviceProperties.limits.maxStorageBufferRange)
+    if(requiredSize > m_physicalDeviceProperties.properties.limits.maxStorageBufferRange)
     {
       continue;
     }
@@ -1107,8 +1109,9 @@ static void traverseVariableLayout(slang::VariableLayoutReflection* varLayoutRef
     const auto& it = outputs.descIdxToResource.find(offset.desc);
     if(it == outputs.descIdxToResource.end())
     {
-      LOGE("Couldn't find a uniform buffer!\n");
+      LOGE("Internal error: Couldn't find a uniform buffer!\n");
       assert(false);
+      return;
     }
     write.bufferIndex = it->second;
     outputs.resources->uniformUpdates.push_back(std::move(write));
@@ -1868,9 +1871,8 @@ static VkResult buildResourcesFromReflection(Resources&                    resou
       write.source               = Source::eProjView;
       resources.hasCameraUniform = true;
     }
-    else if(strieqList(searchName, {"viewProjInverse", "inverseViewProj", "viewProjectionInverse",
-                                    "inverseViewProjection", "projViewInverse", "viewProjInverse",
-                                    "projectionViewInverse", "inverseProjectionView", "ClipToWorld"}))
+    else if(strieqList(searchName, {"viewProjInverse", "inverseViewProj", "viewProjectionInverse", "inverseViewProjection", "projViewInverse",
+                                    "viewProjInverse", "projectionViewInverse", "inverseProjectionView", "ClipToWorld"}))
     {
       write.source               = Source::eProjViewInverse;
       resources.hasCameraUniform = true;
@@ -2344,7 +2346,7 @@ bool Sample::updateFromSlangCode(bool autosave)
     return false;
   }
 
-  // Optional: Run spirv-val on the SPIR-V to catch some errors Slang
+  // Run spirv-val on the SPIR-V to catch some errors Slang
   // doesn't catch before this shader reaches the driver.
   {
     // Match the settings to those that the Vulkan Validation Layers use:
@@ -2379,8 +2381,61 @@ bool Sample::updateFromSlangCode(bool autosave)
         addDiagnostic(Diagnostic{.text = "spirv-val failed, but also didn't produce a diagnostic message!"});
         assert(false);
       }
-      LOGW("Compilation failed.\n");
+      LOGW("Validation failed.\n");
       return false;
+    }
+  }
+
+  // Finally, make sure this shader didn't use any SPIR-V capabilities we know
+  // the driver doesn't support.
+  {
+    // Generally, there are two ways of going about this. We accept shaders by
+    // default and only reject them if we know they use an extension we failed
+    // to enable. To do this, we iterate over the SPIR-V opcodes and look for
+    // disallowed OpCapability opcodes. Don't worry, this is easier than it
+    // sounds! One positive is we only check for capabilities that made it into
+    // the output.
+    //
+    // The opposite approach would be to enable
+    // slang::CompilerOptionName::RestrictiveCapabilityCheck and add every
+    // Slang capability we know to be supported. Then unknown and unsupported
+    // features get rejected.
+    // However, @nbickford ran into this issue while using the second approach
+    // where it let through the fragment shader barycentric capability:
+    // https://github.com/shader-slang/slang/issues/10584
+    // So we go with the first approach where we check the SPIR-V.
+    // Because spir-v already approved the SPIR-V, we can avoid many checks here.
+
+    // A SPIR-V module is a sequence of uint32_t words.
+    const uint32_t* spirv    = m_compiler.getSpirv();
+    const size_t    numWords = m_compiler.getSpirvSize() / sizeof(uint32_t);
+    // The word where the current opcode starts.
+    // We skip over the first 5 words, which are the SPIR-V header: magic
+    // number, version number, generator's magic number, bound, and a reserved value.
+    size_t wordIdx = 5;
+    while(wordIdx < numWords)  // While there are still instructions...
+    {
+      // For all SPIR-V instructions, the 16 high bits of the first word are
+      // the number of words in the instruction, and the 16 low bits are the
+      // SPIR-V opcode.
+      const uint32_t word0  = spirv[wordIdx];
+      const uint32_t opcode = word0 & SpvOpCodeMask;
+      // Is this an OpCapability instruction?
+      if(SpvOpCapability == opcode)
+      {
+        // Its first argument is the capability.
+        const SpvCapability capability = static_cast<SpvCapability>(spirv[wordIdx + 1]);
+        if(m_unsupportedSpirvCapabilities.contains(capability))
+        {
+          addDiagnostic(Diagnostic{.text = std::string("The shader used the ") + SpvCapabilityToString(capability)
+                                           + " SPIR-V capability, which isn't supported on this "
+                                             "device. (You can still view the generated SPIR-V in "
+                                             "View > Target Disassembly, though.)"});
+          LOGW("Validation failed.\n");
+          return false;
+        }
+      }
+      wordIdx += (word0 >> SpvWordCountShift);  // Next instruction
     }
   }
 

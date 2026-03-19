@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -55,6 +55,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct Diagnostic
@@ -120,8 +121,11 @@ private:  // Member variables
   nvvk::Context                       m_ctx;
   std::shared_ptr<nvapp::Application> m_app;
   // System info
-  VkPhysicalDeviceProperties m_physicalDeviceProperties{};
-  bool                       m_rayTracingSupported = false;
+  VkPhysicalDeviceSubgroupProperties m_subgroupProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+  VkPhysicalDeviceProperties2  m_physicalDeviceProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                          .pNext = &m_subgroupProperties};
+  std::unordered_set<uint32_t> m_unsupportedSpirvCapabilities;  // OpCapabilities this device doesn't support
+  bool                         m_rayTracingSupported = false;
   // Performance profiler
   nvutils::ProfilerManager                m_profiler;
   nvutils::ProfilerTimeline*              m_profilerTimeline = nullptr;

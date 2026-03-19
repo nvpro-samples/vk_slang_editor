@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -164,7 +164,7 @@ void TextEditorEx::ReplaceRange(int startLine, int startColumn, int endLine, int
   cursors.getMain().adjustForDelete(start, end);
   const Coordinate newEnd = insertText(transaction, start, text);
   cursors.getMain().adjustForInsert(start, newEnd);
-  endTransaction(transaction);
+  endTransaction(std::move(transaction));
 }
 
 //-----------------------------------------------------------------------------
@@ -965,7 +965,7 @@ constexpr size_t kCharTableSize = 128;
 template <class Codepoint>
 static bool testCodepoint(std::array<bool, kCharTableSize>& table, Codepoint c, bool ifOutsideTable)
 {
-  if(c > table.size())
+  if(c >= table.size())
   {
     return ifOutsideTable;
   }
