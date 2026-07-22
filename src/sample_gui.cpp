@@ -94,32 +94,6 @@ void main(uint2 thread: SV_DispatchThreadID)
 }
 )";
 
-void Diagnostic::updateDisplayText()
-{
-  if(level == Level::eInfo)
-  {
-    displayText = "Info";
-  }
-  else if(level == Level::eWarning)
-  {
-    displayText = "Warning";
-  }
-  else
-  {
-    displayText = "Error";
-  }
-
-  if(line != 0)
-  {
-    displayText = displayText + ", line " + std::to_string(line);
-  }
-  displayText = displayText + ": " + text;
-  if(errorCode != 0)
-  {
-    displayText = displayText + "\n(code " + std::to_string(errorCode) + ")";
-  }
-}
-
 #define FOR_EACH_EDITOR_COLOR(FUNC)                                                                                    \
   FUNC(text)                                                                                                           \
   FUNC(keyword)                                                                                                        \
@@ -465,12 +439,17 @@ VkResult Sample::run()
     m_languageServer.init(m_editors[+Editor::eCode]);
   }
 
-  // Default compiler settings
+  // Slang compiler settings
+  // (in the future we might add a menu to modify these)
   {
     m_compiler.defaultTarget();
     m_compiler.defaultOptions();
-    m_compiler.addOption({slang::CompilerOptionName::DebugInformation, {slang::CompilerOptionValueKind::Int, 1}});
+    // Emit as much debug info as we can:
+    m_compiler.addOption({slang::CompilerOptionName::DebugInformation, {slang::CompilerOptionValueKind::Int, 2}});
+    // Turn off SPIR-V optimization because the driver does its own optimization,
+    // and this mostly makes things slower:
     m_compiler.addOption({slang::CompilerOptionName::Optimization, {slang::CompilerOptionValueKind::Int, 0}});
+    // Ignore capability checks because we'll do our own SPIR-V scan:
     m_compiler.addOption({slang::CompilerOptionName::IgnoreCapabilities, {slang::CompilerOptionValueKind::Int, 1}});
   }
 
@@ -878,7 +857,7 @@ void Sample::guiPaneDiagnostics()
       const Diagnostic& diagnostic = m_diagnostics[i];
       // TODO: Can we replace this with GetContentRegionAvail?
       const float  wrapWidth = ImGui::CalcWrapWidthForPos(ImGui::GetCursorScreenPos(), 0.0f);
-      const ImVec2 textSize  = ImGui::CalcTextSize(diagnostic.displayText.c_str(), nullptr, false, wrapWidth);
+      const ImVec2 textSize  = ImGui::CalcTextSize(diagnostic.text.c_str(), nullptr, false, wrapWidth);
       const ImVec2 cursorPos = ImGui::GetCursorPos();
       ImGui::SetNextItemAllowOverlap();
       if(ImGui::Selectable("##diagnostic", false, ImGuiSelectableFlags_AllowOverlap, textSize))
@@ -886,7 +865,7 @@ void Sample::guiPaneDiagnostics()
         m_editors[+Editor::eCode].ScrollToLine(diagnostic.line, TextEditor::Scroll::alignMiddle);
       }
       ImGui::SetCursorPos(cursorPos);
-      ImGui::TextWrapped("%s", diagnostic.displayText.c_str());
+      ImGui::TextWrapped("%s", diagnostic.text.c_str());
       ImGui::PopID();
     }
     ImGui::PopFont();
@@ -2092,114 +2071,152 @@ void Sample::saveShaderAndConfig(const std::filesystem::path& filename, bool sav
   m_modal.originalCode = slangCode;
 }
 
+// Trims newlines from the start and end of a string.
+static std::string trimNewlines(const std::string_view& s)
+{
+  const size_t substrStartInclusive = s.find_first_not_of("\r\n");
+  const size_t substrEndInclusive   = s.find_last_not_of("\r\n");
+  if(substrStartInclusive == std::string::npos || substrEndInclusive == std::string::npos || substrEndInclusive < substrStartInclusive)
+  {
+    return "";
+  }
+  return std::string(s.substr(substrStartInclusive, substrEndInclusive + 1 - substrStartInclusive));
+}
+
 // Finds, parses, and returns Slang diagnostics in a string.
-std::vector<Diagnostic> parseDiagnostics(const std::string& diagnostics)
+std::vector<Diagnostic> parseDiagnostics(const std::string& diagnosticsText)
 {
   std::vector<Diagnostic> result;
-  if(diagnostics.empty())
+  if(diagnosticsText.empty())
   {
     // No diagnostics, exit early
     return result;
   }
 
-  // Slang emits diagnostics in the form `foundPath(lineNumber): errorLevel code: multi-line-message\n`.
-  // The way we call the compiler, our foundPath is either empty
+  // Slang's rich diagnostics are in the form
+  // `errorLevel[code]: shortDesc\n --> foundPath:lineNumber:character\nmulti-line-message`,
+  // like this:
+  /*
+
+warning[E38040]: entry point parameter treated as uniform
+ --> a5bd8cb8edb7d0c5fe6b36ef4312d3db8bc57e5c:3:15
+  |
+3 | void main(int b) {}
+  |               ^ parameter 'b' is treated as 'uniform' because it does not have a system-value semantic.
+--'
+warning[E39019]: implicit global shader parameter
+ --> a5bd8cb8edb7d0c5fe6b36ef4312d3db8bc57e5c:1:5
+  |
+1 | int a;
+  |     ^ 'a' is implicitly a global shader parameter, not a global variable. If a global variable is intended, add the 'static' modifier. If a uniform shader parameter is intended, add the 'uniform' modifier to silence this warning.
+--'
+
+  */
+  //
+  // We'll use a set of regexes to extract info from this.
+  //
+  // (Note that although we could avoid the parsing problem by using the
+  // EnableMachineReadableDiagnostics compiler option, we'd then have to do
+  // layout on our own, which feels harder than parsing.)
+  //
+  // The way we call the compiler, our foundPath line is either empty
   // (this usually indicates redundant messages, but if no messages had
-  // hexcodes then we print them) or a 40-character hexadecimal hash.
+  // source info then we print them) or contains the source file, line, and character.
+  //
+  // Slang's source file for generating these is
+  // slang/slang-rich-diagnostics-render.cpp.
 
   // First, separate the string into individual diagnostics by breaking on
-  // - newline or the start of the string
-  // - followed by 0 characters or a 40-digit hex string
-  // - followed by an open parenthesis
-  static const std::regex diagnosticStartRegex(R"((^|\n)(|[0-9a-z]{40})\()");
+  // - newline or the start of the string: (^|\n)
+  // - possible additional newlines:       \n*
+  // - followed by one of the messages:    ([a-z][a-z\s]*)
+  static const std::regex diagnosticStartRegex(R"((^|\n)\n*([a-z][a-z\s]*))");
   const auto              regexEnd = std::sregex_iterator();
   std::vector<size_t>     diagnosticMarkerStarts;
   std::vector<size_t>     diagnosticMarkerEnds;
-  std::vector<bool>       diagnosticsImportant;
-  bool                    anyDiagnosticsImportant = false;
-  for(std::sregex_iterator outer = std::sregex_iterator(diagnostics.begin(), diagnostics.end(), diagnosticStartRegex);
+  for(std::sregex_iterator outer = std::sregex_iterator(diagnosticsText.begin(), diagnosticsText.end(), diagnosticStartRegex);
       outer != regexEnd; ++outer)
   {
-    const std::smatch&     match   = *outer;
-    const std::ssub_match& hexcode = match[2];
+    const std::smatch& match = *outer;
     diagnosticMarkerStarts.push_back(static_cast<size_t>(match.position()));
     diagnosticMarkerEnds.push_back(static_cast<size_t>(match.position() + match.length()));
-
-    const bool isImportant = hexcode.length() > 0;
-    anyDiagnosticsImportant |= isImportant;
-    diagnosticsImportant.push_back(isImportant);
+    // Parse the severity:
+    const std::ssub_match& severity = match[2];
+    Diagnostic             diagnostic;
+    if(severity == "ignored")
+    {
+      diagnostic.level = Diagnostic::Level::eIgnored;
+    }
+    else if(severity == "note")
+    {
+      diagnostic.level = Diagnostic::Level::eNote;
+    }
+    else if(severity == "warning")
+    {
+      diagnostic.level = Diagnostic::Level::eWarning;
+    }
+    else
+    {
+      diagnostic.level = Diagnostic::Level::eError;
+    }
+    result.push_back(std::move(diagnostic));
   }
 
-  // Then we'll parse the individal terms:
-  static const std::regex diagnosticParseRegex(R"((\d*)\): ([a-z\s]+)(?:\s(\d+))?: ([\s\S]*))");
-  for(size_t i = 0; i < diagnosticsImportant.size(); i++)
+  // Then we'll parse the individual terms: the rest of the message is
+  // - a line:                    [^\n]*
+  // - then:                      (?:
+  //   - newline:                 \n
+  //   - `gutter--> `:            \s*-->
+  //   - source info:             \w+:(\d+):\d+
+  //   - the rest of the message: [\w\W]*
+  //   maybe:                     )?
+  bool                    anyWereImportant = false;
+  static const std::regex diagnosticParseRegex(R"([^\n]*(?:\n\s*--> \w+:(\d+):\d+[\w\W]*)?)");
+  for(size_t i = 0; i < diagnosticMarkerStarts.size(); i++)
   {
-    // If we have diagnostics but at least one is marked as 'important', then
-    // only show the important ones.
-    if(!diagnosticsImportant[i] && anyDiagnosticsImportant)
-    {
-      continue;
-    }
-    const size_t diagnosticStart = diagnosticMarkerEnds[i];
-    const size_t diagnosticEnd = (i + 1 == diagnosticsImportant.size() ? diagnostics.size() : diagnosticMarkerStarts[i + 1]);
-    const size_t safeLength    = std::max(diagnosticStart, diagnosticEnd) - diagnosticStart;
-    std::string  diagnosticStr = diagnostics.substr(diagnosticStart, safeLength);
-    // Trim newlines from the end of diagnosticStr.
-    while('\n' == diagnosticStr.back() || '\r' == diagnosticStr.back())
-    {
-      diagnosticStr.pop_back();
-    }
-    // Try to match the entire string against the parse regex.
-    std::smatch parsed;
-    Diagnostic  diagnostic;
-    if(std::regex_match(diagnosticStr, parsed, diagnosticParseRegex))
-    {
-      // Group 1 is the line number; group 2 is the severity; group 3 is the error code; group 4 is the message.
-      // The severity list comes from slang-diagnostic-sink.h's getSeverityName.
-      const std::string& severity = parsed[2];
-      if(severity == "ignored")
-      {
-        continue;
-      }
-      else if(severity == "note")
-      {
-        diagnostic.level = Diagnostic::Level::eInfo;
-      }
-      else if(severity == "warning")
-      {
-        diagnostic.level = Diagnostic::Level::eWarning;
-      }
-      else  // error, fatal error, internal error, unknown error
-      {
-        diagnostic.level = Diagnostic::Level::eError;
-      }
+    Diagnostic&  diagnostic = result[i];
+    const size_t restStart  = diagnosticMarkerEnds[i];
+    const size_t restEnd    = (i + 1 == diagnosticMarkerStarts.size()) ?  //
+                               diagnosticsText.size() :                //
+                               diagnosticMarkerStarts[i + 1];
+    assert(restEnd >= restStart);
 
-      diagnostic.text = parsed[4];
-      try
+    diagnostic.text = trimNewlines(diagnosticsText.substr(diagnosticMarkerStarts[i], restEnd - diagnosticMarkerStarts[i]));
+
+    // Try to match the entire rest of the message against the parse regex.
+    const std::string rest = trimNewlines(diagnosticsText.substr(restStart, restEnd - restStart));
+    std::smatch       parsed;
+    if(std::regex_match(rest, parsed, diagnosticParseRegex))
+    {
+      // If we have a capture group, it's the line number:
+      if(parsed.size() > 1 && parsed[1].matched)
       {
-        diagnostic.line = std::stoi(parsed[1]);
-        if(parsed[3].matched)  // Notes about implicit conversions, for instance, have no error codes
+        try
         {
-          diagnostic.errorCode = std::stoull(parsed[3]);
+          diagnostic.line = std::stoi(parsed[1]);
+          anyWereImportant |= (diagnostic.line > 0);
         }
-      }
-      catch(const std::exception& /* unused */)
-      {
-        assert(false);  // Should never happen
-        diagnostic.text += "\n(" TARGET_NAME " could not parse this diagnostic)";
-        diagnostic.level = Diagnostic::Level::eError;
+        catch(const std::exception& /* unused */)
+        {
+          assert(false);  // Should never happen
+        }
       }
     }
     else
     {
       // We couldn't parse it. Luckily, we're in the diagnostic code so we can
       // raise this!
-      diagnostic.text  = diagnosticStr + "\n(" TARGET_NAME " could not parse this diagnostic)";
+      diagnostic.text += "\n(" TARGET_NAME " could not parse this diagnostic)";
       diagnostic.level = Diagnostic::Level::eError;
     }
-
-    result.push_back(std::move(diagnostic));
   }
+
+  // Finally, trim the list of diagnostics to remove ignored/unimportant ones:
+  // (I'm not sure whether `ignored` can ever happen in practice, but let's
+  // handle it anyways):
+  std::erase_if(result, [&](const Diagnostic& diagnostic) {
+    return diagnostic.level == Diagnostic::Level::eIgnored || (anyWereImportant && diagnostic.line == 0);
+  });
 
   return result;
 }
@@ -2209,14 +2226,34 @@ void Sample::updateDiagnosticMarkers()
   // Add markers to text editor
   TextEditor& codeEditor = m_editors[+Editor::eCode];
   codeEditor.ClearMarkers();
+
+  // We group messages together so that if there are multiple errors on a given
+  // line, the tooltip shows all of them.
+  std::unordered_map<int, Diagnostic> lineDiagnostics;
+  for(Diagnostic& diagnostic : m_diagnostics)
+  {
+    const auto& it = lineDiagnostics.find(diagnostic.line);
+    if(it == lineDiagnostics.end())
+    {
+      lineDiagnostics[diagnostic.line] = diagnostic;
+    }
+    else
+    {
+      it->second.level = std::max(it->second.level, diagnostic.level);
+      it->second.text += "\n\n";
+      it->second.text += diagnostic.text;
+    }
+  }
+
   // The last marker placed on a line gets drawn over the rest, so
   // handle markers in order of severity.
-  for(Diagnostic::Level level : {Diagnostic::Level::eInfo, Diagnostic::Level::eWarning, Diagnostic::Level::eError})
+  for(const auto& kvp : lineDiagnostics)
   {
-    ImU32 color{};
-    switch(level)
+    const auto& diagnostic = kvp.second;
+    ImU32       color{};
+    switch(diagnostic.level)
     {
-      case Diagnostic::Level::eInfo:
+      case Diagnostic::Level::eNote:
         color = IM_COL32(102, 102, 102, 128);
         break;
       case Diagnostic::Level::eWarning:
@@ -2228,14 +2265,8 @@ void Sample::updateDiagnosticMarkers()
         break;
     }
 
-    for(Diagnostic& diagnostic : m_diagnostics)
-    {
-      if(diagnostic.level == level)
-      {
-        // This -1 here is because addMarker's lines are 0-indexed
-        codeEditor.AddMarker(std::max(0, diagnostic.line - 1), color, color, diagnostic.text, diagnostic.text);
-      }
-    }
+    // This -1 here is because addMarker's lines are 0-indexed
+    codeEditor.AddMarker(std::max(0, diagnostic.line - 1), color, color, diagnostic.text, diagnostic.text);
   }
 }
 

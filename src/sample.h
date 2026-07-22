@@ -61,17 +61,14 @@
 struct Diagnostic
 {
   std::string text;
-  int         line      = 0;  // 0 == don't display a line number
-  long long   errorCode = 0;  // 0 == don't display an error code
+  int         line = 0;  // 0 == don't display a line number
   enum class Level
   {
-    eInfo,
+    eIgnored,
+    eNote,
     eWarning,
     eError
   } level = Level::eError;
-
-  std::string displayText;
-  void        updateDisplayText();
 };
 
 std::vector<Diagnostic> parseDiagnostics(const std::string& diagnostics);
@@ -227,8 +224,7 @@ private:  // Member variables
 private:  // Private member functions, listed in alphabetical order.
   void addDiagnostic(Diagnostic&& diagnostic)
   {
-    diagnostic.updateDisplayText();
-    LOGW("%s\n", diagnostic.displayText.c_str());
+    LOGW("%s\n", diagnostic.text.c_str());
     m_diagnostics.push_back(std::move(diagnostic));
   }
   // nullptr == there are no textures to display.

@@ -1109,8 +1109,9 @@ static void traverseVariableLayout(slang::VariableLayoutReflection* varLayoutRef
     const auto& it = outputs.descIdxToResource.find(offset.desc);
     if(it == outputs.descIdxToResource.end())
     {
-      LOGE("Internal error: Couldn't find a uniform buffer!\n");
-      assert(false);
+      std::string text = "Internal error: couldn't find a uiform buffer to put " + std::string(name) + " into at set "
+                         + std::to_string(offset.desc.set) + ", binding " + std::to_string(offset.desc.binding) + "!";
+      outputs.diagnostics.push_back({.text = std::move(text), .level = Diagnostic::Level::eError});
       return;
     }
     write.bufferIndex = it->second;
@@ -1693,7 +1694,7 @@ static VkResult buildResourcesFromReflection(Resources&                    resou
       {
         text << passIdx << ": " << resources.passes[passIdx].debugName << "\n";
       }
-      diagnostics.push_back({.text = text.str(), .level = Diagnostic::Level::eInfo});
+      diagnostics.push_back({.text = text.str(), .level = Diagnostic::Level::eNote});
       return VK_ERROR_INITIALIZATION_FAILED;
     }
   }
@@ -2449,7 +2450,7 @@ bool Sample::updateFromSlangCode(bool autosave)
   SlangResult result = reflection->toJson(m_reflectionJson.writeRef());
   if(SLANG_FAILED(result))
   {
-    addDiagnostic({.text = "Could not convert reflection info to JSON", .errorCode = static_cast<long long>(result)});
+    addDiagnostic({.text = "Could not convert reflection info to JSON"});
   }
 
   // Build resources
