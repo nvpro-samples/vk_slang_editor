@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2025-2026, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -88,7 +88,7 @@ VkResult decompressImageFromMemory(CpuImage& result, const void* memory, const s
     // We don't currently handle the full KTX2 format; we only load the first
     // face, layer, and mip. Some of this code is set up for when we do handle
     // it, though.
-    nv_ktx::KTXImage            image;
+    nv_ktx::Image               image;
     MemoryStream                stream(reinterpret_cast<const char*>(memory), numBytes);
     const nv_ktx::ErrorWithText maybeError = image.readFromStream(stream, {});
     if(maybeError.has_value())
@@ -97,33 +97,10 @@ VkResult decompressImageFromMemory(CpuImage& result, const void* memory, const s
       return VK_ERROR_FORMAT_NOT_SUPPORTED;
     }
 
-    // Note: It would be really nice if nv_ktx included this as a helper function.
-    const bool isArray = (image.num_layers_possibly_0 > 0);
-    switch(image.getImageType())
-    {
-      case VK_IMAGE_TYPE_1D:
-        result.dimension = isArray ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D;
-        break;
-      case VK_IMAGE_TYPE_2D:
-        if(image.num_faces > 1)
-        {
-          result.dimension = isArray ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE;
-        }
-        else
-        {
-          result.dimension = isArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
-        }
-        break;
-      case VK_IMAGE_TYPE_3D:
-        result.dimension = VK_IMAGE_VIEW_TYPE_3D;
-        break;
-      default:
-        assert(!"Should be unreachable");
-        break;
-    }
-    result.format = image.format;
-    result.size = VkExtent3D{std::max(1U, image.mip_0_width), std::max(1U, image.mip_0_height), std::max(1U, image.mip_0_depth)};
-    result.allocate(image.num_mips, std::max(1U, image.num_layers_possibly_0), image.num_faces);
+    result.dimension = image.getImageViewType();
+    result.format    = image.format;
+    result.size = VkExtent3D{std::max(1U, image.mip0Width), std::max(1U, image.mip0Height), std::max(1U, image.mip0Depth)};
+    result.allocate(image.numMips, std::max(1U, image.numLayersPossibly0), image.numFaces);
     for(uint32_t mip = 0; mip < result.getNumMips(); mip++)
     {
       for(uint32_t layer = 0; layer < result.getNumLayers(); layer++)
@@ -311,7 +288,7 @@ std::optional<std::vector<uint8_t>> compressImageToJpeg(CpuImage image, int jpeg
   const int       height = static_cast<int>(image.size.height);
   assert(image.format == VK_FORMAT_R8G8B8A8_UNORM);
   const int components = 4;
-  if(!stbi_write_jpg_to_func(stbiWriteCallback, &result, width, height, components, image.subresource(0,0,0).data(), jpegQuality))
+  if(!stbi_write_jpg_to_func(stbiWriteCallback, &result, width, height, components, image.subresource(0, 0, 0).data(), jpegQuality))
   {
     return {};
   }
