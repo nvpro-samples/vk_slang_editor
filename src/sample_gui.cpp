@@ -1211,8 +1211,9 @@ void Sample::guiPaneParameters()
   {
     PE::begin();
     // Draw sliders for all unknown uniforms
-    for(const UniformWrite& uniform : m_resources->uniformUpdates)
+    for(size_t uniformIdx = 0; uniformIdx < m_resources->uniformUpdates.size(); uniformIdx++)
     {
+      const UniformWrite& uniform = m_resources->uniformUpdates[uniformIdx];
       if(uniform.source != Source::eUnknown)
       {
         continue;
@@ -1227,123 +1228,127 @@ void Sample::guiPaneParameters()
         continue;
       }
 
-      // Get raw data for this uniform; this access also creates an entry
-      // if it doesn't exist.
-      void*    data  = m_shaderParams.uniforms[uniform.name].data();
-      uint8_t* bytes = reinterpret_cast<uint8_t*>(data);
-
-      // Convert from a scalar type to an ImGui type so that we can use
-      // ImGui::DragScalarN
-      ImGuiDataType dataType = ImGuiDataType_COUNT;
-      // Note: This could be combined with slangScalarTypeBitSize in sample_render.cpp
-      size_t byteStride = 4;
-      switch(uniform.scalarType)
+      ImGui::PushID(static_cast<int>(uniformIdx));
       {
-        case SLANG_SCALAR_TYPE_INT32:
-          dataType = ImGuiDataType_S32;
-          break;
-        case SLANG_SCALAR_TYPE_UINT32:
-          dataType = ImGuiDataType_U32;
-          break;
-        case SLANG_SCALAR_TYPE_INT64:
-          dataType = ImGuiDataType_S32;
-          break;
-        case SLANG_SCALAR_TYPE_UINT64:
-          dataType   = ImGuiDataType_U64;
-          byteStride = 8;
-          break;
-        case SLANG_SCALAR_TYPE_FLOAT32:
-          dataType = ImGuiDataType_Float;
-          break;
-        case SLANG_SCALAR_TYPE_FLOAT64:
-          dataType   = ImGuiDataType_Double;
-          byteStride = 8;
-          break;
-        case SLANG_SCALAR_TYPE_INT8:
-          dataType   = ImGuiDataType_S8;
-          byteStride = 1;
-          break;
-        case SLANG_SCALAR_TYPE_UINT8:
-          dataType   = ImGuiDataType_U8;
-          byteStride = 1;
-          break;
-        case SLANG_SCALAR_TYPE_INT16:
-          dataType   = ImGuiDataType_S16;
-          byteStride = 2;
-          break;
-        case SLANG_SCALAR_TYPE_UINT16:
-          dataType   = ImGuiDataType_U16;
-          byteStride = 2;
-          break;
-        default:
-          break;  // COUNT can happen for some types
-      }
+        // Get raw data for this uniform; this access also creates an entry
+        // if it doesn't exist.
+        void*    data  = m_shaderParams.uniforms[uniform.name].data();
+        uint8_t* bytes = reinterpret_cast<uint8_t*>(data);
 
-      if(SLANG_SCALAR_TYPE_BOOL == uniform.scalarType)
-      {
-        PE::entry(uniform.name, [&] {
-          bool changed = false;
-          for(uint32_t row = 0; row < uniform.rows; row++)
-          {
-            for(uint32_t col = 0; col < uniform.cols; col++)
+        // Convert from a scalar type to an ImGui type so that we can use
+        // ImGui::DragScalarN
+        ImGuiDataType dataType = ImGuiDataType_COUNT;
+        // Note: This could be combined with slangScalarTypeBitSize in sample_render.cpp
+        size_t byteStride = 4;
+        switch(uniform.scalarType)
+        {
+          case SLANG_SCALAR_TYPE_INT32:
+            dataType = ImGuiDataType_S32;
+            break;
+          case SLANG_SCALAR_TYPE_UINT32:
+            dataType = ImGuiDataType_U32;
+            break;
+          case SLANG_SCALAR_TYPE_INT64:
+            dataType = ImGuiDataType_S32;
+            break;
+          case SLANG_SCALAR_TYPE_UINT64:
+            dataType   = ImGuiDataType_U64;
+            byteStride = 8;
+            break;
+          case SLANG_SCALAR_TYPE_FLOAT32:
+            dataType = ImGuiDataType_Float;
+            break;
+          case SLANG_SCALAR_TYPE_FLOAT64:
+            dataType   = ImGuiDataType_Double;
+            byteStride = 8;
+            break;
+          case SLANG_SCALAR_TYPE_INT8:
+            dataType   = ImGuiDataType_S8;
+            byteStride = 1;
+            break;
+          case SLANG_SCALAR_TYPE_UINT8:
+            dataType   = ImGuiDataType_U8;
+            byteStride = 1;
+            break;
+          case SLANG_SCALAR_TYPE_INT16:
+            dataType   = ImGuiDataType_S16;
+            byteStride = 2;
+            break;
+          case SLANG_SCALAR_TYPE_UINT16:
+            dataType   = ImGuiDataType_U16;
+            byteStride = 2;
+            break;
+          default:
+            break;  // COUNT can happen for some types
+        }
+
+        if(SLANG_SCALAR_TYPE_BOOL == uniform.scalarType)
+        {
+          PE::entry(uniform.name, [&] {
+            bool changed = false;
+            for(uint32_t row = 0; row < uniform.rows; row++)
             {
-              if(col != 0)
+              for(uint32_t col = 0; col < uniform.cols; col++)
               {
-                ImGui::SameLine();
+                if(col != 0)
+                {
+                  ImGui::SameLine();
+                }
+                const uint32_t i = row * uniform.cols + col;
+                ImGui::PushID(i);
+                changed = ImGui::Checkbox("##hidden", reinterpret_cast<bool*>(bytes + 4 * i)) || changed;
+                ImGui::PopID();
               }
-              const uint32_t i = row * uniform.cols + col;
-              ImGui::PushID(i);
-              changed = ImGui::Checkbox("##hidden", reinterpret_cast<bool*>(bytes + 4 * i)) || changed;
+            }
+            return changed;
+          });
+        }
+        else if(SLANG_SCALAR_TYPE_FLOAT16 == uniform.scalarType)
+        {
+          // ImGui doesn't implement float16, so we need to convert to and from `float`
+          PE::entry(uniform.name, [&] {
+            bool      changed = false;
+            uint16_t* halves  = reinterpret_cast<uint16_t*>(bytes);
+            for(uint32_t row = 0; row < uniform.rows; row++)
+            {
+              std::array<float, 4> floats{};
+              for(uint32_t col = 0; col < uniform.cols; col++)
+              {
+                const uint32_t i = row * uniform.cols + col;
+                floats[col]      = glm::detail::toFloat32(halves[i]);
+              }
+              ImGui::PushID(row);
+              ImGui::SetNextItemWidth(-FLT_MIN);
+              changed = ImGui::DragScalarN("##hidden", ImGuiDataType_Float, floats.data(), static_cast<int>(uniform.cols), 0.025f);
+              ImGui::PopID();
+              for(uint32_t col = 0; col < uniform.cols; col++)
+              {
+                const uint32_t i = row * uniform.cols + col;
+                halves[i]        = glm::detail::toFloat16(floats[col]);
+              }
+            }
+            return changed;
+          });
+        }
+        else if(ImGuiDataType_COUNT != dataType)
+        {
+          PE::entry(uniform.name, [&] {
+            bool changed = false;
+            for(uint32_t row = 0; row < uniform.rows; row++)
+            {
+              const float vSpeed = (dataType == ImGuiDataType_Float || dataType == ImGuiDataType_Double) ? 0.025f : 0.25f;
+              ImGui::PushID(row);
+              ImGui::SetNextItemWidth(-FLT_MIN);
+              changed = ImGui::DragScalarN("##hidden", dataType, bytes + byteStride * uniform.cols * row,
+                                           static_cast<int>(uniform.cols), vSpeed)
+                        || changed;
               ImGui::PopID();
             }
-          }
-          return changed;
-        });
+            return changed;
+          });
+        }
       }
-      else if(SLANG_SCALAR_TYPE_FLOAT16 == uniform.scalarType)
-      {
-        // ImGui doesn't implement float16, so we need to convert to and from `float`
-        PE::entry(uniform.name, [&] {
-          bool      changed = false;
-          uint16_t* halves  = reinterpret_cast<uint16_t*>(bytes);
-          for(uint32_t row = 0; row < uniform.rows; row++)
-          {
-            std::array<float, 4> floats{};
-            for(uint32_t col = 0; col < uniform.cols; col++)
-            {
-              const uint32_t i = row * uniform.cols + col;
-              floats[col]      = glm::detail::toFloat32(halves[i]);
-            }
-            ImGui::PushID(row);
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            changed = ImGui::DragScalarN("##hidden", ImGuiDataType_Float, floats.data(), static_cast<int>(uniform.cols), 0.025f);
-            ImGui::PopID();
-            for(uint32_t col = 0; col < uniform.cols; col++)
-            {
-              const uint32_t i = row * uniform.cols + col;
-              halves[i]        = glm::detail::toFloat16(floats[col]);
-            }
-          }
-          return changed;
-        });
-      }
-      else if(ImGuiDataType_COUNT != dataType)
-      {
-        PE::entry(uniform.name, [&] {
-          bool changed = false;
-          for(uint32_t row = 0; row < uniform.rows; row++)
-          {
-            const float vSpeed = (dataType == ImGuiDataType_Float || dataType == ImGuiDataType_Double) ? 0.025f : 0.25f;
-            ImGui::PushID(row);
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            changed = ImGui::DragScalarN("##hidden", dataType, bytes + byteStride * uniform.cols * row,
-                                         static_cast<int>(uniform.cols), vSpeed)
-                      || changed;
-            ImGui::PopID();
-          }
-          return changed;
-        });
-      }
+      ImGui::PopID();
     }
     PE::end();
 
